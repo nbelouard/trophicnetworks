@@ -1,0 +1,276 @@
+---
+title: 'Stable coexistence between four native and one invasive species seen through the lens of isotopic niche analyses #2: Isotope data standardization'
+author: "Nadege Belouard"
+date: "17/11/2020"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+---
+
+# Pitch:
+
+Invasive species are widely reported to cause local extinctions of native species. Where native species do persist, there is a unique opportunity to observe the mechanisms of coexistence at play and the modifications induced by the arrival of the invasive species.
+
+The red swamp crayfish, _Procambarus clarkii_, has been repeatedly shown to alter communities of aquatic ecosystems in its invasive range, and multiple reports of amphibian species decline are of particular concern. The generalist and omnivorous diet of this crayfish, associated to its burrowing activity, makes it interacting in multiple ways with amphibians. Predation on larval amphibians, antagonistic behavioral interactions with newts, depletion of the aquatic vegetation required to their reproduction, modification of resource availability and of water quality have all been detected in experimental conditions. Studying the food webs of natural ecosystems where this crayfish coexists with native amphibians is a way to advance the comprehension of the mechanisms underlying the settlement of species coexistence. 
+
+Despite multiple records of local amphibian extinctions after the introduction of the red swamp crayfish, the stable coexistence of these species has been observed in pond networks of the Natural Regional Park of Brière in northwestern France. What can be learned on the mechanisms of this coexistence based on isotopic niches?
+
+
+
+The purpose of this second vignette is to complete isotopic data transformation from raw data to standardized data to be used in stable isotope analyses of trophic networks.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(tidyr)
+```
+
+We load the raw dataset and have a look at it.
+
+```{r load data}
+Dataset<-read.table("../data-raw/Raw_isotope_dataset.txt", header=T)
+Dataset %>% head() %>% kable()
+```
+
+The dataset contains the name of the pond, sample details, isotopic signatures in the columns "D15N" and "D13C", and the C/N ratio in the last column.
+
+# A- Data wrangling
+
+## 1- Correction of D13C for samples with high lipid content (C/N > 3.5)
+
+First, let's have a look at the average C/N for each species.
+
+```{r look at C.N ratio, message=FALSE, warning=FALSE}
+Dataset %>% 
+  group_by(Species_precis) %>%
+  summarize(meanCN = mean(C.N),
+            minCN = min(C.N),
+            maxCN = max(C.N)) %>%
+  kable()
+```
+
+Since many of them have C/N higher than 3.5, we need to correct the D13C for high lipid content for all groups, except primary producers. We use the equation of Post, 2007. The lipid-free D13C is saved in a new column named "D13C_LF".
+
+```{r correct D13C for high lipid content using Post equation}
+Dataset$D13C_LF <- NA
+
+for (i in 1:dim(Dataset)[1]) {
+  if (Dataset$Species_precis[i] == "Filamenteuse" || Dataset$Species_precis[i] == "Végétation" || Dataset$Species_precis[i] == "Litière") {
+    Dataset$D13C_LF[i] = Dataset$D13C[i]
+  } else { 
+    Dataset$D13C_LF[i] = Dataset$D13C[i] - 3.32+0.99*Dataset$C.N[i]
+  }
+}
+```
+
+And we check that the correction increased D13C:
+
+```{r plot the D13C correction, fig.height=4, fig.width=6}
+plot(Dataset$D13C_LF~Dataset$D13C,
+     xlab = "original D13C",
+     ylab = "corrected D13C")
+abline(0,1)
+```
+
+Corrected D13C are above the y = x line, so it looks ok.
+
+
+## 2- Correction of amphibian fin values for muscle values
+
+In order to reduce sampling invasibility and in accordance with institutional ethics, we sampled amphibian fins instead of muscle, and need to correct values according to equations published in Bélouard et al. (2018);
+
+Equations to correct the $D^{13}C$ values are:  
+For the agile frog: $D^{13}C_{muscle} = 0.85 × D^{13}C_{fin} - 5.50$  
+For the European tree frog:	$D^{13}C_{muscle} = 0.87 × D^{13}C_{fin} - 4.80$  
+For the marbled newt: $D^{13}C_{muscle} = 0.70 × D^{13}C_{fin} - 7.43$  
+For the palmate newt:	$D^{13}C_{muscle} = 0.71 × D^{13}C_{fin} - 7.03$  
+  
+Equations to correct the $D^{15}N$ values are:  
+For the agile frog: $D^{15}N_{muscle} = 0.86 × D^{15}N_{fin} + 0.97$  
+For the European tree frog: $D^{15}N_{muscle} = 1.04 × D^{15}N_{fin} + 0.67$  
+For the marbled newt: $D^{15}N_{muscle} = 1.01 × D^{15}N_{fin} - 0.48$  
+For the palmate newt: $D^{15}N_{muscle} = 0.89 × D^{15}N_{fin} + 0.40$  
+  
+Values corrected for this translation are stored in two new columns: D13C_LFMu and D15N_Mu.
+
+```{r correct fin values}
+
+Dataset$D13C_LFMu <- NA
+Dataset$D15N_Mu <- NA
+
+for (i in 1:dim(Dataset)[1]) {
+  if (Dataset$Species_precis[i] == "Grenouille_agile") {
+    Dataset$D13C_LFMu[i] = 0.85 * Dataset$D13C_LF[i] -5.50
+    Dataset$D15N_Mu[i] = 0.86 * Dataset$D15N[i] + 0.97
+  } else if (Dataset$Species_precis[i] == "Rainette_verte") {
+    Dataset$D13C_LFMu[i] = 0.87 * Dataset$D13C_LF[i] -4.80
+    Dataset$D15N_Mu[i] = 1.04 * Dataset$D15N[i] + 0.67
+  } else if (Dataset$Species_precis[i] == "Triton_marbré") {
+    Dataset$D13C_LFMu[i] = 0.70 * Dataset$D13C_LF[i] - 7.43
+    Dataset$D15N_Mu[i] = 1.01 * Dataset$D15N[i] - 0.48
+  } else if (Dataset$Species_precis[i] == "Triton_palmé") {
+    Dataset$D13C_LFMu[i] = 0.71 * Dataset$D13C_LF[i] - 7.03
+    Dataset$D15N_Mu[i] = 0.89 * Dataset$D15N[i] + 0.40
+  } else { 
+    Dataset$D13C_LFMu[i] = Dataset$D13C_LF[i]
+    Dataset$D15N_Mu[i] = Dataset$D15N[i]
+  }
+}
+```
+
+
+## 3- Taxa groups
+
+Let's have a look at the level of determination of the samples. 
+
+```{r check species groups}
+levels(as.factor(Dataset$Species_precis)) %>% kable()
+```
+For an easier data handling and for prettier figures, we will group some taxa.
+In a column called "Species_odo", we group Aeschnidae, Libellulidae and Zygoptère into "Odonata".
+
+```{r regroup Odonata}
+
+Dataset$Species_Odo <- NA
+
+for (i in 1:dim(Dataset)[1]) {
+  if (Dataset$Species_precis[i] == "Aeshnidae" | Dataset$Species_precis[i] == "Libellulidae" | Dataset$Species_precis[i] == "Zygoptère") {
+    Dataset$Species_Odo[i] <- "Odonata"
+  } else { 
+    Dataset$Species_Odo[i] <- Dataset$Species_precis[i]
+  }
+}
+```
+
+Let's check the levels for the variable "Species_Odo":
+
+```{r check new species groups for Odonata}
+levels(as.factor(Dataset$Species_Odo)) %>% kable()
+```
+
+In a column called "Taxa", we re-use the group "Odonata", we group Acilius, Colymbetes and Dytiscus into "Dytiscidae", and we group Larves_Dytique_Gd and Larves_Dytique_M into "Dyt.larva".
+
+```{r regroup taxa}
+
+Dataset$Taxa <- NA
+
+for (i in 1:dim(Dataset)[1]) {
+  if (Dataset$Species_Odo[i] == "Acilius" | Dataset$Species_Odo[i] == "Colymbetes" | Dataset$Species_Odo[i] == "Dytiscus") {
+    Dataset$Taxa[i] <- "Dytiscidae"
+  } else if (Dataset$Species_Odo[i] == "Larves_Dytique_Gd" | Dataset$Species_Odo[i] == "Larves_Dytique_M") {
+    Dataset$Taxa[i] <- "Dyt.larva"
+  } else { 
+    Dataset$Taxa[i] <- Dataset$Species_Odo[i]
+  }
+}
+```
+
+Let's check the levels for the variable "Taxa":
+
+```{r check new species groups for Taxa}
+levels(as.factor(Dataset$Taxa)) %>% kable()
+```
+
+
+# Retreat one analytical error
+
+In the pond 1016, one sample of zooplancton was taken at the same time as the other samples, but back in the lab, we were not sure that the quantity of zooplankton would be high enough to perform the isotopic analyses. We came back to this pond a few weeks later to take three other samples. It appears that the first sample was sufficient to recover a stable isotope signature, so we remove the samples taken later. We make sure that there is only one sample for pond 1016.
+
+```{r check new species groups for Taxa}
+Dataset<-Dataset[!(Dataset$Species_precis == "Zooplancton" & Dataset$Pond == "1016" & Dataset$N > 7.5),]
+dim(Dataset[(Dataset$Species_precis=="Zooplancton" & Dataset$Pond == "1016"),])[1] == 1
+```
+
+
+
+# B - Data standardization
+
+## 1- Trophic position
+
+We need primary consumers to serve as a baseline to standardize the N isotopic value of samples into a variable called "trophic position" (TP). Candidate taxa are: clams, physa, and zooplankton or gammares as an alternative.
+
+``` {r candidate primary consumers for each pond}
+Dataset %>%
+  filter(Taxa == "Bivalve" | 
+           Taxa ==  "Physe" | 
+           Taxa == "Zooplancton" | 
+           Taxa == "Gammare" |
+           Taxa == "Corixidae" |
+           Taxa == "Aselle") %>%
+  group_by(Taxa, Pond)%>%
+  summarize(n=n()) %>%
+  spread(Taxa, n) %>%
+  kable()
+```
+
+For each pond, there are 2 to 6 points for clams (0 to 3) and physa (0 to 3). 
+Two ponds do not have clams nor physa. So for pond K we use zooplancton (3) and gammares (3), and for pond 949 we use zooplancton (1). We calculate the average D15N of the mean primary consumers and add it to the dataset.
+
+``` {r calculate the baseline D15N}
+MeanBaselineN <- Dataset %>%
+  filter(Taxa == "Bivalve" | 
+           Taxa ==  "Physe" | 
+           Taxa == "Zooplancton" | 
+           Taxa == "Gammare" |
+           Taxa == "Corixidae" |
+           Taxa == "Aselle") %>%
+  group_by(Pond, Taxa)%>%
+  summarize(meanD15N=mean(D15N_Mu)) %>%
+  group_by(Pond) %>%
+  summarize(meanD15N=mean(meanD15N))
+  
+# Add mean baseline to each individual of Dataset
+Dataset<-merge(Dataset,MeanBaselineN,by="Pond", all=TRUE)
+colnames(Dataset)
+```
+
+Based on this baseline of primary consumers, we calculate the trophic position (TP) as
+$TP = 2 + D15N_{sample} - D15N_{baseline} / delta$
+Delta is the fractionation coefficient and here delta = 3.4
+
+``` {r calculate TP}
+Delta=3.4
+Dataset$TP<-2+(Dataset$D15N_Mu-Dataset$meanD15N)/Delta
+```
+
+## 2- Carbon correction
+
+Again, we need primary consumers to serve as markers of the variability in carbon resources in each pond, to standardize the C isotopic value of samples into a variable called "Delta13Ccor". Candidate taxa are: clams, physa, zooplankton and gammares again. We compute the mean of their averaged values.
+
+``` {r carbon correction by primary consumers}
+BaselineC <- Dataset %>%
+  filter(Taxa == "Bivalve" | 
+           Taxa ==  "Physe" | 
+           Taxa == "Zooplancton" | 
+           Taxa == "Gammare" |
+           Taxa == "Corixidae" |
+           Taxa == "Aselle") %>%
+  group_by(Pond, Taxa)%>%
+  summarize(meanD13C=mean(D13C_LFMu)) %>%
+  group_by(Pond) %>%
+  summarize(meanavD13C=mean(meanD13C),
+            maxavD13C=max(meanD13C),
+            minavD13C=min(meanD13C))
+
+#Add mean baseline to each individual of Dataset
+Dataset<-merge(Dataset,BaselineC,by="Pond", all=TRUE)
+
+#Calcul Ccor
+Dataset$D13Ccor_consoI<-(Dataset$D13C_LFMu-Dataset$meanavD13C)/(Dataset$maxavD13C-Dataset$minavD13C)
+```
+
+
+# C- Export dataset
+``` {r export dataset}
+setwd("../exported_data")
+write.table(Dataset,"Isotope_data_standardized.txt")
+
+tiny_dataset <- Dataset %>% select(Pond, Species_precis, Species_Odo, Taxa, Sample_ID, 
+                                   TP, D13Ccor_consoI) 
+write.table(tiny_dataset,"Isotope_data_standardized_tiny.txt")
+```
+
