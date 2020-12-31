@@ -195,16 +195,14 @@ We need primary consumers to serve as a baseline to standardize the N isotopic v
 
 ``` {r candidate primary consumers for each pond}
 Dataset %>%
-  filter(Taxa == "Bivalve" | 
-           Taxa ==  "Physe" | 
-           Taxa == "Zooplancton" | 
-           Taxa == "Gammare" |
-           Taxa == "Corixidae" |
-           Taxa == "Aselle") %>%
+  dplyr::filter(Taxa %in% c("Bivalve", "Physe", "Zooplancton", "Gammare",
+                            "Corixidae","Aselle")) %>%
   group_by(Taxa, Pond)%>%
-  summarize(n=n()) %>%
+  summarise(n=n()) %>%
   spread(Taxa, n) %>%
-  kable()
+  mutate(Total = n(Aselle, Bivalve, Corixidae, Gammare, Physe, Zooplancton))
+
+
 ```
 
 For each pond, there are 2 to 6 points for clams (0 to 3) and physa (0 to 3). 
@@ -212,16 +210,12 @@ Two ponds do not have clams nor physa. So for pond K we use zooplancton (3) and 
 
 ``` {r calculate the baseline D15N}
 MeanBaselineN <- Dataset %>%
-  filter(Taxa == "Bivalve" | 
-           Taxa ==  "Physe" | 
-           Taxa == "Zooplancton" | 
-           Taxa == "Gammare" |
-           Taxa == "Corixidae" |
-           Taxa == "Aselle") %>%
+  dplyr::filter(Taxa %in% c("Bivalve", "Physe", "Zooplancton", "Gammare",
+                            "Corixidae","Aselle")) %>%
   group_by(Pond, Taxa)%>%
-  summarize(meanD15N=mean(D15N_Mu)) %>%
+  summarise(meanD15N=mean(D15N_Mu)) %>%
   group_by(Pond) %>%
-  summarize(meanD15N=mean(meanD15N))
+  summarise(meanD15N=mean(meanD15N))
   
 # Add mean baseline to each individual of Dataset
 Dataset<-merge(Dataset,MeanBaselineN,by="Pond", all=TRUE)

@@ -1,0 +1,107 @@
+---
+title: "Network plots with ellipses"
+author: "Nadege Belouard"
+date: "07/12/2020"
+output: html_document
+---
+
+This vignette draws all the plots related to the trophic networks. First, we load the different packages and datasets that we need.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+library(ggplot2)
+library(ggrepel)
+library("rgeos")
+library(dplyr)
+
+Dataset_homogen<-read.table("C:/Users/Utlisateur/Documents/Nadege/2_Ressources_professionnelles/Reseaux trophiques/Analyses/exported_data/Isotope_data_standardized.txt", header=T)
+dim(Dataset_homogen)
+
+
+# Legend
+Species <-levels(droplevels(as.factor(Dataset_homogen$Taxa)))
+Colors<-c("black","black","black","black",
+          "black","black","#D55E00","#E69F00",
+          "black","black","#0072B2","black",
+          "black","black","black","black",
+          "#009E73","#56B4E9","#CC79A7","black", 
+          "black")
+ColorPalette <- cbind(Taxa = Species, Palette = Colors)
+Dataset_homogen <- merge(Dataset_homogen, ColorPalette,by="Taxa")
+
+# Dataset
+Avg_data_std <- Dataset_homogen %>% group_by(Taxa, Pond) %>%
+  summarise(TPavg = mean(TP),
+            D13Cavg = mean(D13Ccor_consoI),
+            TPsd = sd(TP),
+            D13Csd = sd(D13Ccor_consoI))
+
+
+#Load the file with the coordinates of the standard ellipses
+CoordSEAc_consoI <- read.table("C:/Users/Utlisateur/Documents/Nadege/2_Ressources_professionnelles/Reseaux trophiques/Analyses/exported_data/Coordinates_SEAc_consoI.txt", header=T)
+names(CoordSEAc_consoI)[5] <- "Taxa"
+CoordSEAc_consoI <- merge(CoordSEAc_consoI, ColorPalette, by="Taxa")
+
+
+```
+
+We summarize each taxa by the average point and its SD to graphically represent the position and the variability in the isotopic signature of each taxa.
+
+
+# Plots with ellipses 
+
+```{r plot standardized networks consoI, include=FALSE}
+
+for (i in levels(as.factor(Dataset_homogen$Pond))) {
+  M_ind <- Dataset_homogen %>% filter(Pond == i) %>%
+    filter (Taxa %in% c("Grenouille_agile", "Rainette_verte", "Triton_palmé", 
+                        "Triton_marbré", "Ecrevisse_Ad", "Ecrevisse_Juv"))
+  M_avg <- Avg_data_std %>% filter(Pond == i) %>% 
+  filter (Taxa %in% c("Bivalve", "Physe", "Zooplancton", "Gammare",
+                            "Corixidae","Aselle"))
+  M_coord <- CoordSEAc_consoI %>% filter(Pond == i)
+
+  
+f <- ggplot(data = M_ind, aes(x = D13Ccor_consoI, y = TP)) +
+  theme_classic() +
+  ggtitle(i) +
+  geom_text_repel(data = M_avg, 
+                  aes(x = D13Cavg, y = TPavg, label = Taxa),
+                  colour = "darkgrey", size = 3, show.legend = F) + 
+  geom_errorbar(data = M_avg, 
+                aes(y = TPavg, ymin = TPavg - TPsd, ymax = TPavg + TPsd), 
+                colour = "darkgrey", width = 0.05, show.legend = F) +
+  geom_errorbarh(data = M_avg, 
+                 aes(x = D13Cavg, xmin = D13Cavg - D13Csd, xmax = D13Cavg + D13Csd), 
+                 colour = "darkgrey", height = 0.05, show.legend = F) +
+  geom_point(data = M_ind, aes(x = D13Ccor_consoI, y = TP, colour = Palette), size = 1) +
+  geom_path(data = M_coord, aes(coordX, coordY, col = Palette), size=0.5, linetype=1) +
+  scale_colour_identity() +
+  xlim(c(min(Dataset_homogen$D13Ccor_consoI), max(Dataset_homogen$D13Ccor_consoI))) +
+  ylim(c(min(Dataset_homogen$TP), max(Dataset_homogen$TP)))
+
+
+ggsave(f, filename = file.path("networks_ellipses", paste("M",i,"_ellipses.png",sep="")), width=7, height=6)
+}
+
+```
+
+
+
+
+#### Figures d'ellipses pour chaque espèce ----------------------------------------------####
+# #Grenouille agile
+Grenouille_agile<-Dataset[Dataset$Taxons=="Grenouille_agile",]
+summary(Grenouille_agile)
+levels(droplevels(Grenouille_agile$Pond))
+
+GAGI_SEAc_consoI<-CoordSEAc_consoI[CoordSEAc_consoI$Taxons=="Grenouille_agile",]
+MeanCoordGAGI_consoI<-MeanCoord_consoI[MeanCoord_consoI$Taxons=="Grenouille_agile",]
+
+GAGI2<-ggplot(Grenouille_agile, aes(x=D13Ccor_consoI, y=TP, col=Pond))+
+  theme_classic()+
+  coord_cartesian(xlim=c(-3.8,3.8),ylim=c(1.5,3.5))+
+  geom_path(data=GAGI_SEAc_consoI, aes(coordX, coordY), size=0.5, linetype=1,show.legend=F)+
+  ggtitle(label="Agile frog_consoI")
+

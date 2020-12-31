@@ -1,0 +1,585 @@
+---
+title: "Stable coexistence between four native and one invasive species seen through the lens of isotopic niche analyses #6: Statistical models"
+author: "Nadege Belouard"
+date: "12/16/2020"
+output: html_document
+---
+
+This vignette tests the link between isotopic niche metrics and candidate variables.
+We begin by loading required libraries and datasets.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(lme4)
+library(car)
+library(MuMIn)
+library(ggplot2)
+library(RVAideMemoire)
+library(ggrepel)
+library(dplyr)
+library(magrittr)
+library(Hmisc)
+library(reshape2)
+
+#Load datasets
+Envt<-read.table("C:/Users/Utlisateur/Documents/Nadege/2_Ressources_professionnelles/Reseaux trophiques/Analyses/data-raw/Candidate_hab_com_variables.txt", h=T)
+
+Pop_metrics<-read.table("C:/Users/Utlisateur/Documents/Nadege/2_Ressources_professionnelles/Reseaux trophiques/Analyses/exported_data/Population_metrics.txt",h=T)
+
+Com_metrics<-read.table("C:/Users/Utlisateur/Documents/Nadege/2_Ressources_professionnelles/Reseaux trophiques/Analyses/exported_data/Community_metrics.txt",h=T)
+
+Mean_position<-read.table("C:/Users/Utlisateur/Documents/Nadege/2_Ressources_professionnelles/Reseaux trophiques/Analyses/exported_data/Meanposition_SEAc.txt", header=T)
+dim(Mean_position)[1]
+
+#Create a dataset only for amphibian populations
+Pop_amphib <- Pop_metrics[Pop_metrics$Taxa=="Grenouille_agile"|
+                                Pop_metrics$Taxa=="Rainette_verte"|
+                                Pop_metrics$Taxa=="Triton_palmé"|
+                                Pop_metrics$Taxa=="Triton_marbré",] %>%
+  mutate(Group = NA)
+
+for (i in 1:length(Pop_amphib$Pond)) {
+  if (Pop_amphib$Taxa[i] == "Grenouille_agile" | Pop_amphib$Taxa[i] == "Rainette_verte") {
+    Pop_amphib$Group[i] = "Tadpoles"
+  } else {
+    Pop_amphib$Group[i] = "Newts"
+  }
+}
+
+
+Pop_crayfish <- Pop_metrics[Pop_metrics$Taxa=="Ecrevisse_Juv"|
+                                Pop_metrics$Taxa=="Ecrevisse_Ad",]
+
+
+print("Is the number of amphibians populations 44?")
+dim(Pop_amphib)[1] == 44
+
+print("What are the candidate explicative variables?")
+names(Envt)
+
+```
+
+
+First, we test the correlation between metrics, in order to determine whether some of them are irrelevant to test.
+
+```{r compare metrics, include=FALSE}
+
+usdm::vif(Pop_amphib[c(14:19,21)])
+
+Metrics_cor <- rcorr(as.matrix(Pop_amphib[c(14:19,21)]), type= "pearson")
+Metrics_cor_r <- melt(Metrics_cor$r)
+Metrics_cor_p <- melt(Metrics_cor$P)
+Metrics_cor_merged <- merge(Metrics_cor_r, Metrics_cor_p, by = c("Var1", "Var2"))
+Metrics_cor_uncor <- Metrics_cor_merged %>% filter(value.y > 0.05)
+Metrics_cor_uncor
+
+?rcorr
+
+# CR and NR are the only variables that are totally uncorrelated: r = 0.10, p = 0.52
+
+Metrics_cor_cor <- Metrics_cor_merged %>% filter(value.y < 0.05)
+min(Metrics_cor_cor$value.x)
+max(Metrics_cor_cor$value.x)
+mean(Metrics_cor_cor$value.x) #]cor = 0.73
+sd(Metrics_cor_cor$value.x) #sd = 0.18
+
+```
+
+The six metrics of Layman are all highly correlated (mean cor = 0.76 +/- 0.19 sd, all p < 0.05), except CR and NR (max cor = 0.08, p > 0.5). It means that there is a close relationship between niche core size, niche total size, and distance between individuals, but a lower correlation between the number of trophic levels encompassed and the breadth of resources used.
+
+
+Second, we run the same tests for the explicative variables.
+
+```{r compare environmental variables, include=FALSE}
+
+Candidate <- Envt %>% dplyr::select(Pond, Canopycover, Aq_VegCover, CrayfishCPUE, Area)
+
+usdm::vif(Candidate[-1])
+
+Candidate_cor <- rcorr(as.matrix(Candidate[-1]))
+Candidate_cor_r <- melt(Candidate_cor$r)
+Candidate_cor_p <- melt(Candidate_cor$P)
+Candidate_cor_merged <- merge(Candidate_cor_r, Candidate_cor_p, by = c("Var1", "Var2"))
+Candidate_cor_uncor <- Candidate_cor_merged %>% filter(value.y > 0.05)
+Candidate_cor_uncor
+
+# cor.test(Candidate$CrayfishCPUE, Candidate$Canopycover) #cor = 0.54
+# cor.test(Candidate$CrayfishCPUE, Candidate$Aq_VegCover) #cor = -0.58
+# cor.test(Candidate$CrayfishCPUE, Candidate$Renovation) #cor = -0.30
+# cor.test(Candidate$Crayfish01, Candidate$Renovation) #cor = -0.52
+
+# Candidate_cor_cor <- Candidate_cor_merged %>% filter(value.y < 0.05)
+# min(abs(Candidate_cor_cor$value.x))
+# max(abs(Candidate_cor_cor$value.x))
+# mean(abs(Candidate_cor_cor$value.x)) #]cor = 0.55
+# sd(abs(Candidate_cor_cor$value.x)) #sd = 0.05
+```
+
+All explicative variables are moderately correlated (0.55 +/- 0.05), and the VIF is always < 2.5. Models will include a maximum of 2 variables to avoid overfitting.
+
+
+We now merge the metrics and the candidate variables dataset.
+
+```{r merge datasets for amphibians, include=FALSE}
+
+#Merge metrics and explicative variables
+Pop_dataset <- merge(Pop_amphib, Envt, by = "Pond")
+print("Is there still 44 populations in the dataset?")
+dim(Pop_dataset)[1] == 44
+```
+
+
+
+Here comes the true modelling part: we test the effect of candidate variables on isotopic metrics of populations: 
+
+# Variation in amphibian niche metrics
+## Niche size (SEAc, TA, NR, CR)
+
+For each metric tested, we (1) check GOF of a simple model, and transform the metric if necessary, (2) run the model selection and (3) plot the figure corresponding to the selected models.
+
+We begin with the metrics CR.
+
+```{r glm on population metrics: CR, include=FALSE}
+
+# Check residuals
+mod1<-lmer(CRcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod1)
+print("Residuals do not look ok")
+
+#Transform metric to obtain normal residuals
+mod2 <- lmer(log(CRcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod2) 
+print("Residuals are a little better after CR is log-transformed, but still not completely normal. We proceed with the transformation")
+
+#Test variables
+mod3<-lmer(log(CRcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) + 
+             scale(CrayfishCPUE) + as.factor(Crayfish01) + (1|Pond),
+           na.action="na.fail", data=Pop_dataset)
+CR_dredge<-dredge(mod3, rank=AICc, m.lim=c(0,2), extra="R^2")
+subset(CR_dredge, delta<2)
+
+print("Model selection includes the effect of canopy cover and that of crayfish presence. If we remove the two outliers shown in the first residuals plot, the model selection is as follows:")
+
+Pop_dataset_out <- Pop_dataset[-c(39,13),]
+
+mod4<-lmer(log(CRcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) + 
+             scale(CrayfishCPUE) + as.factor(Crayfish01) + (1|Pond),
+           na.action="na.fail", data=Pop_dataset_out)
+CR_dredge<-dredge(mod4, rank=AICc, m.lim=c(0,2), extra="R^2")
+subset(CR_dredge, delta<2)
+
+print("The model selection now includes only the model with canopy cover and the null model, meaning that the candidate variables are just overfitting the model.")
+
+# Models
+mod5<-lmer(log(CRcp) ~ scale(Canopycover) +(1|Pond), na.action="na.fail", data=Pop_dataset)
+
+#Corresponding figures
+ggplot(Pop_dataset, aes(y = log(CRcp), x = scale(Canopycover))) + geom_point()
+
+
+
+#Check residuals
+mod1<-lmer(CRcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_newts)
+plotresid(mod1) #residuals not ok
+
+#Transform variable to meet residuals normality
+mod2<-lmer(log(CRcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_newts)
+plotresid(mod2) #residuals look ok
+
+# Test effect of candidate variables
+mod3 <- lmer(log(CRcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + (1|Pond), 
+             na.action="na.fail", data = Pop_newts)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,1), extra="R^2")
+subset(SEA_dredge, delta < 2)
+
+
+
+#Check residuals
+mod1<-lmer(CRcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_tadpoles)
+plotresid(mod1) #residuals not ok
+
+#Transform variable to meet residuals normality
+mod2<-lmer(log(CRcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_tadpoles)
+plotresid(mod2) #residuals look ok
+
+# Test effect of candidate variables
+mod3 <- lmer(log(CRcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + (1|Pond), 
+             na.action="na.fail", data = Pop_tadpoles)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,1), extra="R^2")
+subset(SEA_dredge, delta < 2)
+
+```
+
+CR models have poor GOF. Next, we analyze NR.
+
+```{r glm on population metrics: NR, include=FALSE}
+
+#Check residuals
+mod1<-lmer(NRcp ~ Canopycover + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod1)
+print("The model has singularities but we cannot remove any effect, so I think we can keep it as is. Residuals appear correct but can be improved.")
+
+#Transform metric
+mod2<-lmer(log(NRcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod2)
+print("Residuals are not improved by the transformation so we keep the metric untransformed")
+
+#Model selection
+mod3<-lmer(NRcp ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+           scale(CrayfishCPUE) + as.factor(Crayfish01) + (1|Pond),
+           na.action="na.fail", data=Pop_dataset)
+NR_dredge <- dredge(mod3, rank=AICc, m.lim=c(0,2), extra="R^2")
+subset(NR_dredge, delta<2) 
+print("The model selection includes the null model and the effect of crayfish abundance. We try removing the outlier seen on the first residuals plot to see what it changes.")
+
+Pop_dataset_out <- Pop_dataset[-c(16, 38),]
+mod4<-lmer(log(NRcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+           scale(CrayfishCPUE) + as.factor(Crayfish01) + (1|Pond),
+           na.action="na.fail", data=Pop_dataset_out)
+NR_dredge <- dredge(mod4, rank=AICc, m.lim=c(0,2), extra="R^2")
+subset(NR_dredge, delta<2) 
+print("The model selection is the same without the two outliers.")
+
+# Models
+mod5<-lmer(NRcp ~ scale(CrayfishCPUE) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+
+#Corresponding plots
+ggplot(Pop_dataset, aes(y = NRcp, x = scale(CrayfishCPUE))) + geom_point()
+
+
+
+
+
+
+#Check residuals
+mod1<-lmer(NRcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_newts)
+plotresid(mod1) #residuals not ok
+
+#Transform variable to meet residuals normality
+mod2<-lmer(log(NRcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_newts)
+plotresid(mod2) #residuals look ok
+
+# Test effect of candidate variables
+mod3 <- lmer(log(NRcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + (1|Pond), 
+             na.action="na.fail", data = Pop_newts)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,1), extra="R^2")
+subset(SEA_dredge, delta < 2)
+
+
+
+#Check residuals
+mod1<-lmer(NRcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_tadpoles)
+plotresid(mod1) #residuals not ok
+
+#Transform variable to meet residuals normality
+mod2<-lmer(log(NRcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_tadpoles)
+plotresid(mod2) #residuals look ok
+
+# Test effect of candidate variables
+mod3 <- lmer(log(NRcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + (1|Pond), 
+             na.action="na.fail", data = Pop_tadpoles)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,1), extra="R^2")
+subset(SEA_dredge, delta < 2)
+```
+
+NR produce singular fit. Next, we analyze SEAc.
+
+```{r glm on population metrics: SEAc, include=FALSE}
+
+#Check residuals
+mod1<-lmer(SEAc ~ scale(Canopycover) +(1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod1) #residuals not ok
+
+#Transform variable to meet residuals normality
+mod2<-lmer(log(SEAc) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod2) #residuals look ok
+
+# Test effect of candidate variables
+mod3 <- lmer(log(SEAc) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) +  Taxa + Group + (1|Pond), 
+             na.action="na.fail", data = Pop_dataset)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,2), extra="R^2")
+subset(SEA_dredge, delta < 2)
+
+#Test without the 2 outliers.
+Pop_dataset_out <- Pop_dataset[-c(38,39),]
+
+# Test effect of candidate variables
+mod3 <- lmer(log(SEAc) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + Taxa + Group + (1|Pond), 
+             na.action="na.fail", data = Pop_dataset_out)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,2), extra="R^2")
+subset(SEA_dredge, delta < 2)
+
+
+#  Models
+summary(mod1<-lmer(log(SEAc) ~ scale(CrayfishCPUE) + scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset))
+summary(mod1<-lmer(log(SEAc) ~ scale(CrayfishCPUE) + (1|Pond), na.action="na.fail", data=Pop_dataset))
+
+# Corresponding figures
+gSEA1 <- ggplot(Pop_dataset, aes(y = log(SEAc), x = scale(CrayfishCPUE))) + 
+  geom_point(aes(col = Taxa), size = 2, show.legend = F) +
+  scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
+               theme_classic()
+gSEA2 <- ggplot(Pop_dataset, aes(y = log(SEAc), x = scale(Canopycover))) +
+    geom_point(aes(col = Taxa), size = 2, show.legend = F) +
+  scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
+               theme_classic()
+  
+
+```
+
+```{r glm on population metrics: SEAc, include=FALSE}
+
+#try and run it separately on tadpoles and newts
+Pop_tadpoles <- Pop_dataset %>% filter(Taxa == "Grenouille_agile" |
+                                         Taxa == "Rainette_verte")
+dim(Pop_tadpoles)
+
+Pop_newts <- Pop_dataset %>% filter(Taxa == "Triton_palmé" |
+                                      Taxa == "Triton_marbré")
+dim(Pop_newts)
+
+
+#Check residuals
+mod1<-lmer(SEAc ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_tadpoles)
+plotresid(mod1) #residuals not ok
+
+#Transform variable to meet residuals normality
+mod2<-lmer(log(SEAc) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_tadpoles)
+plotresid(mod2) #residuals look ok
+
+# Test effect of candidate variables
+mod3 <- lmer(log(SEAc) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + (1|Pond), 
+             na.action="na.fail", data = Pop_tadpoles)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,1), extra="R^2")
+subset(SEA_dredge, delta < 2)
+
+
+#Check residuals
+mod1<-lmer(SEAc ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_newts)
+plotresid(mod1) #residuals not ok
+
+#Transform variable to meet residuals normality
+mod2<-lmer(log(SEAc) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_newts)
+plotresid(mod2) #residuals look ok
+
+# Test effect of candidate variables
+mod3 <- lmer(log(SEAc) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + (1|Pond), 
+             na.action="na.fail", data = Pop_newts)
+SEA_dredge <- dredge(mod3, rank = AICc, m.lim = c(0,1), extra="R^2")
+subset(SEA_dredge, delta < 2)
+
+
+```
+
+
+```{r glm on population metrics: TA, include=FALSE}
+
+# Check residuals
+mod1 <- lmer(TAcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+summary(mod1) 
+plotresid(mod1) #residuals are not normal
+
+#Transform metric to get normal residuals
+mod2 <- lmer(log(TAcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod2)
+
+# Test effect of candidate variables
+mod3 <- lmer(log(TAcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+             scale(CrayfishCPUE) + (1|Pond), 
+             na.action="na.fail", data=Pop_dataset)
+TA_dredge <- dredge(mod3, rank=AICc, m.lim=c(0,1), extra="R^2")
+subset(TA_dredge, delta<2)
+
+# Models
+summary(mod1<-lmer(log(TAb) ~ Crayfish01 + (1|Pond), na.action="na.fail", data=Pop_dataset))
+summary(mod1<-lmer(log(TAb) ~ scale(CrayfishCPUE) + (1|Pond), na.action="na.fail", data=Pop_dataset))
+summary(mod1<-lmer(log(TA_C1_b) ~ scale(Canopycover) +(1|Pond), na.action="na.fail", data=Pop_dataset))
+
+
+#Corresponding figures
+ggplot(Pop_dataset, aes(y = TAb, x = Crayfish01)) + geom_point()
+ggplot(Pop_dataset, aes(y = TAb, x = CrayfishCPUE)) + geom_point(aes(col=Taxa))
+ggplot(Pop_dataset, aes(y = TAb, x = Canopycover)) + geom_point(aes(col=Taxa))
+
+```
+
+
+## Individual variability (CD, MNND, SDNND)
+
+```{r glm on population metrics: CD, include=FALSE}
+
+# Check residuals
+mod1<-lmer(CDcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod1)#not ok!
+
+# Transform variables
+mod2<-lmer(log(CDcp) ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod2)#ok
+
+# Test variables
+mod3<-lmer(log(CDcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+             scale(CrayfishCPUE) + (1|Pond), 
+          na.action="na.fail", data=Pop_dataset)
+CD_dredge<-dredge(mod3, rank=AICc, m.lim=c(0,1), extra="R^2")
+subset(CD_dredge, delta<2) #works
+
+# Models
+summary(mod1<-lmer(log(CDb) ~ Crayfish01 +(1|Pond), na.action="na.fail", data=Pop_dataset))
+summary(mod1<-lmer(log(CDb) ~ scale(CrayfishCPUE) + (1|Pond), na.action="na.fail", data=Pop_dataset))
+
+#Corresponding figures
+ggplot(Pop_dataset, aes(y = CDb, x = Crayfish01)) + geom_point()
+ggplot(Pop_dataset, aes(y = CDb, x = CrayfishCPUE)) + geom_point()
+ggplot(Pop_dataset, aes(y = CDb, x = Canopycover)) + geom_point()
+
+```
+Models retained include the variables crayfish presence/absence, canopy cover;
+
+
+```{r glm on population metrics: MNND, include=FALSE}
+
+# Check residuals
+mod1 <- lmer(MNNDcp ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod1) #residuals are not totally ok
+
+# Log transform the metric
+mod1<-lmer(log(MNNDcp) ~ scale(Canopycover) +(1|Pond), na.action="na.fail", data=Pop_dataset)
+plotresid(mod1)#better
+
+# Test variables
+mod3<-lmer(log(MNNDcp) ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+             scale(CrayfishCPUE) + (1|Pond), 
+           na.action="na.fail", data=Pop_dataset)
+MNND_dredge<-dredge(mod3, rank=AICc, m.lim=c(0,2), extra="R^2")
+subset(MNND_dredge, delta<2) #works
+
+# Models
+summary(mod1<-lmer(log(MNNDb) ~ Crayfish01 +(1|Pond), na.action="na.fail", data=Pop_dataset))
+
+
+#Corresponding figures
+ggplot(Pop_dataset, aes(y = MNNDb, x = Crayfish01)) + geom_point()
+
+```
+
+
+
+# Variation in amphibian niche position
+
+```{r glm on population metrics, include=FALSE}
+
+Mean_position_amphib <- Mean_position %>% filter(Species %in% c("Grenouille_agile",
+                                                                "Rainette_verte", 
+                                                                "Triton_palmé", 
+                                                                "Triton_marbré")) %>%
+  mutate(Group = NA)
+
+
+for (i in 1:length(Mean_position_amphib$Pond)) {
+  if (Mean_position_amphib$Species[i] == "Grenouille_agile" | Mean_position_amphib$Species[i] == "Rainette_verte") {
+    Mean_position_amphib$Group[i] = "Tadpoles"
+  } else {
+    Mean_position_amphib$Group[i] = "Newts"
+  }
+}
+
+
+dim(Mean_position_amphib)[1] == 44
+
+#Merge metrics and explicative variables
+Mean_position_dataset <- merge(Mean_position_amphib, Envt, by = "Pond")
+print("Is there still 44 populations in the dataset?")
+dim(Mean_position_dataset)[1] == 44
+
+cor.test(Mean_position_dataset$TPavg, Mean_position_dataset$D13Cavg, method="pearson")
+cor.test(Mean_position_dataset$TPavg, Pop_dataset$SEAc, method="pearson")
+cor.test(Mean_position_dataset$D13Cavg, Pop_dataset$SEAc, method="pearson")
+
+plot(Mean_position_dataset$TPavg, Pop_dataset$SEAc)
+plot(Mean_position_dataset$D13Cavg, Pop_dataset$SEAc)
+```
+
+```{r glm on population metrics: mean TP, include=FALSE}
+
+# TPavg
+# Check residuals
+mod1 <- lmer(TPavg ~ scale(Canopycover) + (1|Pond), na.action="na.fail", data=Mean_position_dataset)
+plotresid(mod1) #residuals ok
+
+# Test effect of candidate variables
+mod2 <- lmer(TPavg ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + Group + Species + (1|Pond), 
+             na.action="na.fail", data = Mean_position_dataset)
+TP_dredge <- dredge(mod2, rank = AICc, m.lim = c(0,2), extra="R^2")
+subset(TP_dredge, delta < 2)
+
+#Models
+summary(mod2 <- lmer(TPavg ~ Group + (1|Pond), 
+             na.action="na.fail", data = Mean_position_dataset))
+
+# Corresponding figures
+gTPavg <- ggplot(Mean_position_dataset, aes(y = TPavg, x = Group)) + 
+         geom_boxplot() +
+  geom_point(aes(col = Species), size = 2, show.legend = F) +
+  scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
+               theme_classic()
+gTPavg
+```
+
+
+```{r glm on population metrics: mean D13Ccor, include=FALSE}
+
+# D13Cavg
+# Check residuals
+mod1 <- lmer(D13Cavg ~ scale(Canopycover) +(1|Pond), na.action="na.fail", data=Mean_position_dataset)
+plotresid(mod1) #residuals ok
+
+# Test effect of candidate variables
+mod2 <- lmer(D13Cavg ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + Species + Group + (1|Pond), 
+             na.action="na.fail", data = Mean_position_dataset)
+D13C_dredge <- dredge(mod2, rank = AICc, m.lim = c(0,2), extra="R^2")
+subset(D13C_dredge, delta < 2)
+
+
+#Test without the 4 outliers (pond 48)
+Mean_position_dataset_out <- Mean_position_dataset %>% filter(Pond != "48")
+
+mod2 <- lmer(D13Cavg ~ scale(Area) + scale(Canopycover) + scale(Aq_VegCover) +
+               scale(CrayfishCPUE) + Species + Group + (1|Pond), 
+             na.action="na.fail", data = Mean_position_dataset_out)
+D13C_dredge <- dredge(mod2, rank = AICc, m.lim = c(0,2), extra="R^2")
+subset(D13C_dredge, delta < 2)
+
+
+
+#Models
+summary(mod2 <- lmer(D13Cavg ~ Group + (1|Pond), 
+             na.action="na.fail", data = Mean_position_dataset))
+
+# Corresponding figures
+gD13Cavg <- ggplot(Mean_position_dataset, aes(y = D13Cavg, x = Group)) + 
+         geom_boxplot() +
+  geom_point(aes(col = Species), size = 2, show.legend = F) +
+  scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
+               theme_classic()+ coord_flip()
+gD13Cavg
+
+```
+
+```{r figure for models results}
+library(gridExtra)
+
+models <- grid.arrange(gSEA1, gSEA2, gTPavg, gD13Cavg)
+
+ggsave(models, filename = "Figure_models.png", width=7, height=6)
+```

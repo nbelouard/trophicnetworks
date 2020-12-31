@@ -322,9 +322,10 @@ dim(Dataset_homogen)
 # 6- Export dataset
 ``` {r export dataset}
 setwd("../exported_data")
-write.table(Dataset,"Isotope_data_standardized.txt")
+write.table(Dataset_homogen,"Isotope_data_standardized.txt")
 
-tiny_dataset <- Dataset %>% select(Pond, Species_precis, Species_Odo, Taxa, Sample_ID, 
-                                   TP, D13Ccor_consoI) 
+tiny_dataset <- Dataset_homogen %>% dplyr::select(Pond, Species_precis, Species_Odo, 
+                                           Taxa, Sample_ID, TP, D13Ccor_consoI) 
 write.table(tiny_dataset,"Isotope_data_standardized_tiny.txt")
+
 ```
