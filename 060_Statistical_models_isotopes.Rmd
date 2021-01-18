@@ -88,6 +88,31 @@ sd(Metrics_cor_cor$value.x) #sd = 0.18
 
 The six metrics of Layman are all highly correlated (mean cor = 0.76 +/- 0.19 sd, all p < 0.05), except CR and NR (max cor = 0.08, p > 0.5). It means that there is a close relationship between niche core size, niche total size, and distance between individuals, but a lower correlation between the number of trophic levels encompassed and the breadth of resources used.
 
+We also compute the summary of these metrics per species
+```{r compare metrics, include=FALSE}
+
+summary_pop_metrics <- Pop_metrics %>% group_by(Taxa) %>% 
+  summarise(N = n(),
+            meanTA = mean(TAcp),
+            meanSEAc = mean(SEAc),
+            meanNR = mean(NRcp),
+            meanCR = mean(CRcp),
+            meanCD = mean(CDcp),
+            meanMNND = mean(MNNDcp),
+            meanSDNND = mean(SDNNDcp),
+            sdTA = sd(TAcp),
+            sdSEAc = sd(SEAc),
+            sdNR = sd(NRcp),
+            sdCR = sd(CRcp),
+            sdCD = sd(CDcp),
+            sdMNND = sd(MNNDcp),
+            sdSDNND = sd(SDNNDcp))
+
+
+write.table(summary_pop_metrics, "Summary_pop_metrics.txt")
+
+```
+
 
 Second, we run the same tests for the explicative variables.
 
@@ -324,14 +349,19 @@ summary(mod1<-lmer(log(SEAc) ~ scale(CrayfishCPUE) + (1|Pond), na.action="na.fai
 # Corresponding figures
 gSEA1 <- ggplot(Pop_dataset, aes(y = log(SEAc), x = scale(CrayfishCPUE))) + 
   geom_point(aes(col = Taxa), size = 2, show.legend = F) +
+  xlab("Crayfish abundance") +
+  ylab("log(SEAc)") +
   scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
                theme_classic()
 gSEA2 <- ggplot(Pop_dataset, aes(y = log(SEAc), x = scale(Canopycover))) +
     geom_point(aes(col = Taxa), size = 2, show.legend = F) +
+    xlab("Canopy cover") +
+  ylab("log(SEAc)") +
   scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
                theme_classic()
   
-
+gSEA1
+gSEA2
 ```
 
 ```{r glm on population metrics: SEAc, include=FALSE}
@@ -529,6 +559,8 @@ summary(mod2 <- lmer(TPavg ~ Group + (1|Pond),
 # Corresponding figures
 gTPavg <- ggplot(Mean_position_dataset, aes(y = TPavg, x = Group)) + 
          geom_boxplot() +
+    ylab("Mean population TP") +
+  xlab(NULL) +
   geom_point(aes(col = Species), size = 2, show.legend = F) +
   scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
                theme_classic()
@@ -569,6 +601,8 @@ summary(mod2 <- lmer(D13Cavg ~ Group + (1|Pond),
 # Corresponding figures
 gD13Cavg <- ggplot(Mean_position_dataset, aes(y = D13Cavg, x = Group)) + 
          geom_boxplot() +
+    ylab("Mean population D13C") +
+  xlab(NULL) +
   geom_point(aes(col = Species), size = 2, show.legend = F) +
   scale_colour_manual(values = c("#0072B2", "#009E73","#56B4E9","#CC79A7")) + 
                theme_classic()+ coord_flip()

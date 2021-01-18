@@ -194,14 +194,14 @@ dim(Dataset[(Dataset$Species_precis=="Zooplancton" & Dataset$Pond == "1016"),])[
 We need primary consumers to serve as a baseline to standardize the N isotopic value of samples into a variable called "trophic position" (TP). Candidate taxa are: clams, physa, and zooplankton or gammares as an alternative.
 
 ``` {r candidate primary consumers for each pond}
-Dataset %>%
+C1 <- Dataset %>%
   dplyr::filter(Taxa %in% c("Bivalve", "Physe", "Zooplancton", "Gammare",
                             "Corixidae","Aselle")) %>%
   group_by(Taxa, Pond)%>%
   summarise(n=n()) %>%
-  spread(Taxa, n) %>%
-  mutate(Total = n(Aselle, Bivalve, Corixidae, Gammare, Physe, Zooplancton))
+  spread(Pond, n)
 
+C1$total = sum(C1$Aselle, C1$Bivalve, C1$Corixidae, C1$Gammare, C1$Physe, C1$Zooplancton, na.rm=T)
 
 ```
 
